@@ -1,13 +1,10 @@
 require 'formula'
 
-class Redcar <Formula
+class Redcar < Formula
   head 'git://github.com/danlucraft/redcar.git'
-  homepage 'http://github.com/danlucraft/redcar'
+  homepage 'https://github.com/danlucraft/redcar'
 
   depends_on 'jruby'
-
-  # rspec doesn't provide an 'rspec' module, so our test fails.
-  # depends_on 'rspec' => :jruby
   depends_on 'cucumber' => :jruby
 
   def install

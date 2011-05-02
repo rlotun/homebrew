@@ -4,24 +4,25 @@ def build_java?; ARGV.include? "--java"; end
 def build_perl?; ARGV.include? "--perl"; end
 def build_python?; ARGV.include? "--python"; end
 def build_ruby?; ARGV.include? "--ruby"; end
-def build_universal?; ARGV.include? '--universal'; end
+def build_universal?; ARGV.build_universal?; end
 def with_unicode_path?; ARGV.include? '--unicode-path'; end
 
 # On 10.5 we need newer versions of apr, neon etc.
 # On 10.6 we only need a newer version of neon
-class SubversionDeps <Formula
-  url 'http://subversion.tigris.org/downloads/subversion-deps-1.6.12.tar.bz2'
-  md5 '41a91aa26980236958ec508807003203'
+class SubversionDeps < Formula
+  url 'http://subversion.tigris.org/downloads/subversion-deps-1.6.16.tar.bz2'
+  md5 '85255aee26e958fc988e6e56d6d1ac55'
 end
 
-class Subversion <Formula
-  url 'http://subversion.tigris.org/downloads/subversion-1.6.12.tar.bz2'
-  md5 'a4b1d0d7f3a4587c59da9c1acf9dedd0'
+class Subversion < Formula
+  url 'http://subversion.tigris.org/downloads/subversion-1.6.16.tar.bz2'
+  md5 '32f25a6724559fe8691d1f57a63f636e'
   homepage 'http://subversion.apache.org/'
 
-  depends_on 'pkg-config'
+  depends_on 'pkg-config' => :build
+
   # On Snow Leopard, build a new neon. For Leopard, the deps above include this.
-  depends_on 'neon' if MACOS_VERSION >= 10.6
+  depends_on 'neon' if MacOS.snow_leopard?
 
   def options
     [
@@ -32,6 +33,20 @@ class Subversion <Formula
       ['--universal', 'Build as a Universal Intel binary.'],
       ['--unicode-path', 'Include support for OS X unicode (but see caveats!)']
     ]
+  end
+
+  def patches
+    # Patch to find Java headers
+    p = { :p0 =>
+      "http://trac.macports.org/export/73004/trunk/dports/devel/subversion-javahlbindings/files/patch-configure.diff"
+    }
+
+    # Patch for subversion handling of OS X Unicode paths (see caveats)
+    if with_unicode_path?
+      p[:p1] = "https://gist.github.com/raw/434424/subversion-unicode-path.patch"
+    end
+
+    return p
   end
 
   def setup_leopard
@@ -53,15 +68,21 @@ class Subversion <Formula
   end
 
   def install
-    if build_java? and not build_universal?
-      opoo "A non-Universal Java build was requested."
-      puts "To use Java bindings with various Java IDEs, you might need a universal build:"
-      puts "  brew install --universal --java subversion"
+    if build_java?
+      unless build_universal?
+        opoo "A non-Universal Java build was requested."
+        puts "To use Java bindings with various Java IDEs, you might need a universal build:"
+        puts "  brew install subversion --universal --java"
+      end
+
+      unless (ENV["JAVA_HOME"] or "").empty?
+        opoo "JAVA_HOME is set. Try unsetting it if JNI headers cannot be found."
+      end
     end
 
     ENV.universal_binary if build_universal?
 
-    if MACOS_VERSION < 10.6
+    if MacOS.leopard?
       setup_leopard
     else
       check_neon_arch if build_universal?
@@ -84,6 +105,9 @@ class Subversion <Formula
     args << "--with-ruby-sitedir=#{lib}/ruby" if build_ruby?
     args << "--with-unicode-path" if with_unicode_path?
 
+    # Undo a bit of the MacPorts patch
+    inreplace "configure", "@@DESTROOT@@/", ""
+
     system "./configure", *args
     system "make"
     system "make install"
@@ -98,14 +122,22 @@ class Subversion <Formula
       # Remove hard-coded ppc target, add appropriate ones
       if build_universal?
         arches = "-arch x86_64 -arch i386"
-      elsif MACOS_VERSION < 10.6
+      elsif MacOS.leopard?
         arches = "-arch i386"
       else
         arches = "-arch x86_64"
       end
 
+      # Use verison-appropriate system Perl
+     if MacOS.leopard?
+        perl_version = "5.8.8"
+      else
+        perl_version = "5.10.0"
+      end
+
       inreplace "Makefile" do |s|
-        s.change_make_var! "SWIG_PL_INCLUDES", "$(SWIG_INCLUDES) #{arches} -g -pipe -fno-common -DPERL_DARWIN -fno-strict-aliasing -I/usr/local/include  -I/System/Library/Perl/5.10.0/darwin-thread-multi-2level/CORE"
+        s.change_make_var! "SWIG_PL_INCLUDES",
+          "$(SWIG_INCLUDES) #{arches} -g -pipe -fno-common -DPERL_DARWIN -fno-strict-aliasing -I/usr/local/include -I/System/Library/Perl/#{perl_version}/darwin-thread-multi-2level/CORE"
       end
       system "make swig-pl"
       system "make install-swig-pl"
@@ -118,16 +150,9 @@ class Subversion <Formula
     end
 
     if build_ruby?
-      ENV.j1
+      ENV.j1 # This build isn't parallel safe
       system "make swig-rb"
       system "make install-swig-rb"
-    end
-  end
-
-  def patches
-    if with_unicode_path?
-      # Patch that modify subversion paths handling to manage unicode paths issues
-      "http://gist.github.com/raw/434424/subversion-unicode-path.patch"
     end
   end
 
@@ -165,7 +190,8 @@ class Subversion <Formula
     if build_java?
       s += <<-EOS.undent
         You may need to link the Java bindings into the Java Extensions folder:
-          sudo ln -s #{HOMEBREW_PREFIX}/lib/libsvnjavahl-1.dylib /Library/Java/Extensions
+          sudo mkdir -p /Library/Java/Extensions
+          sudo ln -s #{HOMEBREW_PREFIX}/lib/libsvnjavahl-1.dylib /Library/Java/Extensions/libsvnjavahl-1.dylib
 
       EOS
     end
